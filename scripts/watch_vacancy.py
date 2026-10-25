@@ -283,7 +283,8 @@ AVAILABILITY_JA = {"available": "空きあり", "full": "満室", "unknown": "�
 def rooms_label(hotel: dict) -> str:
     rooms = [r for r in hotel.get("rooms", []) if r.get("available")]
     if not rooms:
-        return "空きあり（部屋タイプは読み取れず）"
+        notes = " ".join(norm(hotel.get("notes", "")).replace("|", "／").split())  # 表が崩れないように
+        return "空きあり（部屋タイプは読み取れず）" + (f"・{notes[:80]}" if notes else "")
     return "、".join(f"{r['type']}（{r.get('status_raw', '')}"
                     f"{'・' + format(r['price_yen'], ',') + '円' if r.get('price_yen') else ''}）" for r in rooms)
 
