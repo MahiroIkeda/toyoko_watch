@@ -38,7 +38,7 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "type": { "type": "string", "description": "部屋タイプ（例: ツイン、ダブル、エコノミーダブル）" },
+                "type": { "type": "string", "description": "部屋タイプ（例: ツイン、ダブル、エコノミーダブル。喫煙ルームは「ダブル（喫煙）」のように書く）" },
                 "status_raw": { "type": "string", "description": "画面上の空室表示そのまま（例: ○、残り2室、満室）" },
                 "available": { "type": "boolean", "description": "この部屋タイプが今予約できるか" },
                 "price_yen": { "type": ["integer", "null"], "description": "1泊1室の料金（分かれば）" }
