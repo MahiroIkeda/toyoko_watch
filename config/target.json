@@ -1,0 +1,10 @@
+{
+  "site_url": "https://www.toyoko-inn.com/",
+  "checkin": "2026-10-31",
+  "checkout": "2026-11-01",
+  "rooms": 1,
+  "adults": 2,
+  "hotel_keywords": ["池袋", "大塚"],
+  "area_hints": ["池袋", "大塚"],
+  "stop_watching_at": "2026-10-31T20:00:00+09:00"
+}

@@ -1,0 +1,64 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error"],
+      "description": "ok = 検索結果を読めた（全館満室でも ok）。error = サイト障害・メンテナンス・検索できない等。"
+    },
+    "checkin_seen": {
+      "type": "string",
+      "description": "検索結果に表示されていたチェックイン日 (YYYY-MM-DD)"
+    },
+    "nights_seen": {
+      "type": ["integer", "null"],
+      "description": "検索結果に表示されていた泊数（分からなければ null）"
+    },
+    "adults_seen": {
+      "type": ["integer", "null"],
+      "description": "検索結果に表示されていた1部屋あたりの人数（分からなければ null）"
+    },
+    "hotels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "description": "ホテル名（画面の表記のまま。例: 東横INN池袋北口I）" },
+          "url": { "type": ["string", "null"], "description": "そのホテルの空室・料金が見られるページの URL" },
+          "availability": {
+            "type": "string",
+            "enum": ["available", "full", "unknown"],
+            "description": "available = 指定の人数で予約できる部屋が1つ以上空いている / full = すべて満室 / unknown = 読み取れなかった"
+          },
+          "rooms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "type": { "type": "string", "description": "部屋タイプ（例: ツイン、ダブル、エコノミーダブル）" },
+                "status_raw": { "type": "string", "description": "画面上の空室表示そのまま（例: ○、残り2室、満室）" },
+                "available": { "type": "boolean", "description": "この部屋タイプが今予約できるか" },
+                "price_yen": { "type": ["integer", "null"], "description": "1泊1室の料金（分かれば）" }
+              },
+              "required": ["type", "status_raw", "available", "price_yen"]
+            },
+            "description": "指定の人数で泊まれる部屋タイプの一覧"
+          },
+          "notes": { "type": "string", "description": "補足（読み取れなかった点など）" }
+        },
+        "required": ["name", "url", "availability", "rooms", "notes"]
+      }
+    },
+    "search_urls": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "検索結果ページを直接開ける URL（次回のヒントにする）。GET で再現できない場合は空配列。"
+    },
+    "notes": { "type": "string", "description": "補足（見つからなかったホテル、迷った点など）" },
+    "error": { "type": ["string", "null"], "description": "status=error のときの理由" }
+  },
+  "required": ["status", "checkin_seen", "nights_seen", "adults_seen", "hotels", "search_urls", "notes", "error"]
+}

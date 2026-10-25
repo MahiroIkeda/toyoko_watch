@@ -1,0 +1,16 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "isolated": true,
+    "launchOptions": {
+      "channel": "chrome",
+      "headless": true
+    },
+    "contextOptions": {
+      "locale": "ja-JP",
+      "timezoneId": "Asia/Tokyo",
+      "viewport": { "width": 1280, "height": 900 }
+    }
+  },
+  "outputDir": "out/playwright"
+}

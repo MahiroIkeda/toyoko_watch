@@ -1,0 +1,85 @@
+name: toyoko-watch
+
+# 東横イン公式サイトの空室を10分ごとに確認し、空きが出たら Issue で知らせる（予約はしない）。
+# 満室に戻ったら Issue を閉じ、監視期限 (config/target.json の stop_watching_at) を過ぎたら自分自身を無効化して止まる。
+
+on:
+  schedule:
+    # 10分ごと（GitHub の schedule は遅れたり間引かれたりするので、README の「10分ごとに確実に動かす」も参照）
+    - cron: "3,13,23,33,43,53 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "watch=本番（空きが出たら Issue で通知） / check=空室チェックだけ（通知しない）"
+        type: choice
+        options: [check, watch]
+        default: check
+
+permissions:
+  contents: read
+  issues: write # 空室の通知
+  actions: write # 監視期限を過ぎたらこのワークフローを無効化する
+
+concurrency:
+  group: toyoko-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    # ubuntu-latest は Ubuntu 26 へ移行中なので、Google Chrome 入りが確認できている 24.04 に固定する
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: toyoko-state-${{ github.run_id }}
+          restore-keys: toyoko-state-
+
+      - name: Install Claude Code and Playwright MCP
+        run: npm install -g @anthropic-ai/claude-code@2.1.310 @playwright/mcp@0.0.83
+
+      - name: Check vacancy
+        env:
+          # Team プランの利用枠で動かすなら CLAUDE_CODE_OAUTH_TOKEN（claude setup-token で発行）。
+          # ANTHROPIC_API_KEY（従量課金）を使う場合はこちらだけ設定する
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TW_MODE: ${{ inputs.mode || 'watch' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # トークンをコピーしたときに紛れ込みやすい改行・空白を取り除く（トークン自体に空白は含まれない）。
+          # 設定していない方の認証情報は空文字になるので消しておく
+          for name in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY; do
+            value="$(printf '%s' "${!name}" | tr -d '[:space:]')"
+            if [ -n "$value" ]; then
+              echo "::add-mask::$value"
+              export "$name=$value"
+            else
+              unset "$name"
+            fi
+          done
+          python3 scripts/watch_vacancy.py --mode "$TW_MODE"
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: toyoko-state-${{ github.run_id }}
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toyoko-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/
+          retention-days: 3
+          if-no-files-found: ignore
