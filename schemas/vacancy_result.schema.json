@@ -55,7 +55,7 @@
     "search_urls": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "検索結果ページを直接開ける URL（次回のヒントにする）。GET で再現できない場合は空配列。"
+      "description": "検索結果ページを直接開ける URL（次回のヒントにする）。禁煙・喫煙が「指定なし」の検索結果だけを入れる（両方を別々に検索した場合は両方の URL）。GET で再現できない場合は空配列。"
     },
     "notes": { "type": "string", "description": "補足（見つからなかったホテル、迷った点など）" },
     "error": { "type": ["string", "null"], "description": "status=error のときの理由" }
