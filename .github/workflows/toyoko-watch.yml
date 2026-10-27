@@ -1,7 +1,7 @@
 name: toyoko-watch
 
 # 東横イン公式サイトの空室を10分ごとに確認し、空きが出たら Issue で知らせる（予約はしない）。
-# 満室に戻ったら Issue を閉じ、監視期限 (config/target.json の stop_watching_at) を過ぎたら自分自身を無効化して止まる。
+# 満室に戻ったら Issue を閉じ、すべての日程の監視期限 (config/target.json の stop_watching_at) を過ぎたら自分自身を無効化して止まる。
 
 on:
   schedule:
@@ -14,6 +14,10 @@ on:
         type: choice
         options: [check, watch]
         default: check
+      target:
+        description: "1つの日程・エリアだけ調べるときの id（config/target.json の targets[].id。例: shizuoka）。空欄ならすべて"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -28,7 +32,7 @@ jobs:
   watch:
     # ubuntu-latest は Ubuntu 26 へ移行中なので、Google Chrome 入りが確認できている 24.04 に固定する
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30 # 日程・エリア1つにつき最大7分
     steps:
       - uses: actions/checkout@v5
 
@@ -53,6 +57,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TW_MODE: ${{ inputs.mode || 'watch' }}
+          TW_TARGET: ${{ inputs.target }}
           GH_TOKEN: ${{ github.token }}
         run: |
           # トークンをコピーしたときに紛れ込みやすい改行・空白を取り除く（トークン自体に空白は含まれない）。
@@ -66,7 +71,7 @@ jobs:
               unset "$name"
             fi
           done
-          python3 scripts/watch_vacancy.py --mode "$TW_MODE"
+          python3 scripts/watch_vacancy.py --mode "$TW_MODE" ${TW_TARGET:+--target "$TW_TARGET"}
 
       - name: Save state
         if: always()

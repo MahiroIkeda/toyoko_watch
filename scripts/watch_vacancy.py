@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """東横イン公式サイトの空室を監視し、空きが出たら GitHub Issue で知らせる（予約はしない）。
 
-GitHub Actions から10分ごとに呼ばれる想定。1回の実行で次を行う。
-  1. 監視期限を過ぎていたらワークフローを無効化して終わる
+GitHub Actions から10分ごとに呼ばれる想定。config/target.json の targets（日程・エリアの組）ごとに次を行う。
+  1. 監視期限を過ぎた target は飛ばす（すべて過ぎたらワークフローを無効化して終わる）
   2. 空室チェック用エージェント (Haiku) で、対象エリアの東横インの空室を読む
   3. 空きが出たら Issue を作って知らせる（すでに通知中なら、新しく空いたホテルだけコメントで追記）
   4. 通知中に全館満室へ戻ったら、Issue にコメントして閉じる
@@ -10,6 +10,7 @@ GitHub Actions から10分ごとに呼ばれる想定。1回の実行で次を�
 モード (--mode):
   watch  本番。空室の変化を Issue で知らせる（既定）
   check  空室チェックだけ。通知はしない
+--target <id> で1つの target だけを調べる。
 """
 
 from __future__ import annotations
@@ -140,13 +141,16 @@ def run_url() -> str:
     return f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
 
 
-def create_issue(title: str, body: str, label: str) -> int | None:
+def create_issue(title: str, body: str, labels: list[str]) -> int | None:
     if not IN_ACTIONS:
-        log(f"[通知] {title}\n{body}")
+        log(f"[通知] {title} {labels}\n{body}")
         return None
-    gh("label", "create", LABEL_VACANCY, "--color", "0e8a16", "--description", "東横インの空室あり", "--force", check=False)
-    gh("label", "create", LABEL_NOTICE, "--color", "fbca04", "--description", "空室監視からのお知らせ", "--force", check=False)
-    args = ["issue", "create", "--title", title, "--body", f"{body}\n\n実行ログ: {run_url()}", "--label", label]
+    descriptions = {LABEL_VACANCY: ("0e8a16", "東横インの空室あり"), LABEL_NOTICE: ("fbca04", "空室監視からのお知らせ")}
+    for label in labels:
+        color, description = descriptions.get(label, ("c5def5", "空室監視の対象"))
+        gh("label", "create", label, "--color", color, "--description", description, "--force", check=False)
+    args = ["issue", "create", "--title", title, "--body", f"{body}\n\n実行ログ: {run_url()}",
+            *(a for label in labels for a in ("--label", label))]
     owner = os.environ.get("GITHUB_REPOSITORY_OWNER")
     proc = gh(*args, *(["--assignee", owner] if owner else []), check=False)
     if proc.returncode != 0:
@@ -167,10 +171,16 @@ def comment_issue(number: int | None, body: str, close: bool = False) -> None:
         gh("issue", "comment", str(number), "--body", body)
 
 
-def find_open_vacancy_issue(state: dict) -> int | None:
+def target_label(cfg: dict) -> str:
+    """target ごとの Issue ラベル（同じリポジトリで複数の日程・エリアを見分ける）。"""
+    return f"toyoko-{cfg['id']}"
+
+
+def find_open_vacancy_issue(cfg: dict, state: dict) -> int | None:
     if not IN_ACTIONS:
         return state.get("open_issue")
-    proc = gh("issue", "list", "--label", LABEL_VACANCY, "--state", "open", "--json", "number", "--limit", "1")
+    proc = gh("issue", "list", "--label", LABEL_VACANCY, "--label", target_label(cfg), "--state", "open",
+              "--json", "number", "--limit", "1")
     issues = json.loads(proc.stdout or "[]")
     return issues[0]["number"] if issues else None
 
@@ -196,6 +206,7 @@ def run_checker(cfg: dict, hint_urls: list[str]) -> dict:
     if not claude:
         raise ConfigError("claude コマンドが見つかりません（npm i -g @anthropic-ai/claude-code）")
     payload = {k: cfg[k] for k in ("site_url", "checkin", "checkout", "rooms", "adults", "hotel_keywords", "area_hints")}
+    payload["exclude_keywords"] = cfg.get("exclude_keywords", [])
     payload["hint_urls"] = hint_urls
     prompt = ("次の条件で、東横イン公式サイトの空室を調べて、指定の JSON スキーマで返してください。予約はしないでください。"
               f"\n\n```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n")
@@ -250,7 +261,9 @@ def json_from_text(text: str) -> dict | None:
 
 def target_hotels(cfg: dict, check: dict) -> list[dict]:
     keywords = [norm(k) for k in cfg["hotel_keywords"]]
-    return [h for h in check.get("hotels", []) if any(k in norm(h.get("name", "")) for k in keywords)]
+    excludes = [norm(k) for k in cfg.get("exclude_keywords", [])]
+    return [h for h in check.get("hotels", [])
+            if any(k in norm(h.get("name", "")) for k in keywords) and not any(k in norm(h.get("name", "")) for k in excludes)]
 
 
 def is_available(hotel: dict) -> bool:
@@ -298,7 +311,7 @@ def vacancy_body(cfg: dict, hotels: list[dict], check: dict) -> str:
     others = [h for h in target_hotels(cfg, check) if h not in hotels]
     other_lines = "\n".join(f"- {h['name']}: {AVAILABILITY_JA.get(h.get('availability'), h.get('availability'))}" for h in others) or "- なし"
     return (
-        f"東横イン（{'・'.join(cfg['hotel_keywords'])}周辺）に空室が出ました。\n\n"
+        f"東横イン（{cfg['label']}）に空室が出ました。\n\n"
         f"- 日程: {cfg['checkin']} チェックイン → {cfg['checkout']} チェックアウト\n"
         f"- 人数: 1室 大人{cfg['adults']}名\n\n"
         "| ホテル | 空いている部屋 | 空室ページ |\n|---|---|---|\n"
@@ -318,7 +331,7 @@ def report(cfg: dict, check: dict) -> None:
         log(f"  notes: {check['notes']}")
     rows = "\n".join(f"| {h['name']} | {AVAILABILITY_JA.get(h.get('availability'), h.get('availability'))} | {rooms_label(h) if is_available(h) else ''} |"
                      for h in hotels)
-    write_summary(f"### 空室チェック {now_jst():%m/%d %H:%M} JST（{stay_label(cfg)}）\n\n"
+    write_summary(f"### {cfg['label']} {now_jst():%m/%d %H:%M} JST（{stay_label(cfg)}）\n\n"
                   f"| ホテル | 空室 | 空いている部屋 |\n|---|---|---|\n{rows}\n\n{check.get('notes', '')}\n")
 
 
@@ -326,81 +339,74 @@ def report(cfg: dict, check: dict) -> None:
 # 本体
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=["watch", "check"], default="watch")
-    args = parser.parse_args()
+def load_targets(cfg: dict, only: str | None) -> list[dict]:
+    targets = [{"site_url": cfg["site_url"], **t} for t in cfg["targets"]]
+    if only:
+        targets = [t for t in targets if t["id"] == only]
+        if not targets:
+            raise ConfigError(f"config/target.json に id={only} の target がありません")
+    return targets
 
-    if IN_ACTIONS and not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")):
-        raise ConfigError("Secrets に CLAUDE_CODE_OAUTH_TOKEN（claude setup-token で発行）を設定してください")
 
-    cfg = load_config()
-    state = load_state()
-    OUT_DIR.mkdir(exist_ok=True)
-    log(f"mode={args.mode} {cfg['checkin']}→{cfg['checkout']} 1室{cfg['adults']}名 / {'・'.join(cfg['hotel_keywords'])}")
+def target_state(state: dict, cfg: dict, first_id: str) -> dict:
+    targets = state.setdefault("targets", {})
+    if not targets and any(k in state for k in ("hint_urls", "notified", "open_issue", "error_streak")):
+        # target が1つだった頃の state を、最初の target のものとして引き継ぐ
+        targets[first_id] = {k: state.pop(k) for k in ("hint_urls", "notified", "open_issue", "error_streak") if k in state}
+    return targets.setdefault(cfg["id"], {})
 
-    if args.mode == "watch" and now_jst() >= dt.datetime.fromisoformat(cfg["stop_watching_at"]):
-        log(f"監視期限 {cfg['stop_watching_at']} を過ぎたので終了します")
-        if "period-ended" not in state.get("notices", []):
-            create_issue("[東横イン] 空室の監視期間が終わりました",
-                         f"{cfg['stop_watching_at']} を過ぎたので監視を終了しました。", LABEL_NOTICE)
-            state.setdefault("notices", []).append("period-ended")
-            save_json(STATE_PATH, state)
-        disable_workflow()
-        return 0
 
+def watch_target(cfg: dict, state: dict, mode: str) -> bool:
+    """1つの target を調べて通知する。チェックに失敗したら False。"""
+    log(f"=== {cfg['label']}（{stay_label(cfg)}）/ {'・'.join(cfg['hotel_keywords'])} ===")
     stamp = f"{now_jst():%Y%m%d-%H%M}"
     try:
         check = run_checker(cfg, state.get("hint_urls", []))
     except AgentError as e:
         check = {"status": "error", "error": str(e), "hotels": []}
-    save_json(OUT_DIR / f"check-{stamp}.json", check)
+    save_json(OUT_DIR / f"check-{cfg['id']}-{stamp}.json", check)
     if check.get("status") == "ok" and not target_hotels(cfg, check):
         check = {**check, "status": "error",
                  "error": f"名前に {'・'.join(cfg['hotel_keywords'])} を含むホテルが検索結果に見つかりませんでした: {check.get('notes', '')}"}
 
     if check.get("status") != "ok":
         state["error_streak"] = state.get("error_streak", 0) + 1
-        warn(f"空室チェックに失敗しました（{state['error_streak']} 回連続）: {check.get('error')}")
-        write_summary(f"### 空室チェック失敗\n\n{check.get('error')}\n")
-        if args.mode == "watch" and state["error_streak"] == ERROR_STREAK_NOTIFY:
-            create_issue("[東横イン] 空室チェックが続けて失敗しています",
+        warn(f"{cfg['label']}: 空室チェックに失敗しました（{state['error_streak']} 回連続）: {check.get('error')}")
+        write_summary(f"### {cfg['label']}: 空室チェック失敗\n\n{check.get('error')}\n")
+        if mode == "watch" and state["error_streak"] == ERROR_STREAK_NOTIFY:
+            create_issue(f"[東横イン] {cfg['label']}の空室チェックが続けて失敗しています",
                          f"{ERROR_STREAK_NOTIFY} 回続けて空室チェックに失敗しました。監視は続けています。\n\n"
-                         f"直近のエラー:\n```\n{check.get('error')}\n```", LABEL_NOTICE)
-        save_json(STATE_PATH, state)
-        return 0 if args.mode == "watch" else 1
+                         f"直近のエラー:\n```\n{check.get('error')}\n```", [LABEL_NOTICE, target_label(cfg)])
+        return False
     state["error_streak"] = 0
 
     report(cfg, check)
     mismatch = condition_mismatch(cfg, check)
     if mismatch:
-        warn(f"{mismatch}。今回は通知しません")
-        save_json(STATE_PATH, state)
-        return 0
+        warn(f"{cfg['label']}: {mismatch}。今回は通知しません")
+        return True
     if check.get("search_urls"):
         state["hint_urls"] = check["search_urls"][:4]
 
     available = available_hotels(cfg, check)
     log("空室あり: " + (" / ".join(h["name"] for h in available) or "なし"))
-    if args.mode == "check":
-        save_json(STATE_PATH, state)
-        return 0
+    if mode == "check":
+        return True
 
-    open_issue = find_open_vacancy_issue(state)
+    open_issue = find_open_vacancy_issue(cfg, state)
     if open_issue is None and state.get("open_issue"):
         # 通知した Issue を自分で閉じた（予約できた・見送った）なら、知らせ済みのホテルは満室に戻るまで再通知しない
         log(f"通知中の Issue #{state['open_issue']} が閉じられていました。知らせ済みのホテルは再通知しません")
         state["open_issue"] = None
     if not available and not all_full(cfg, check):
         log("読み取れなかったホテルがあるので、今回は通知の状態を変えません")
-        save_json(STATE_PATH, state)
-        return 0
+        return True
 
     notified = set(state.get("notified", []))
     new = [h for h in available if norm(h["name"]) not in notified]
     if new and open_issue is None:
         title = f"[東横イン] 空室あり: {new[0]['name']}{' ほか' if len(new) > 1 else ''}（{stay_label(cfg)}）"
-        state["open_issue"] = create_issue(title, vacancy_body(cfg, available, check), LABEL_VACANCY)
+        state["open_issue"] = create_issue(title, vacancy_body(cfg, available, check), [LABEL_VACANCY, target_label(cfg)])
     elif new:
         comment_issue(open_issue, f"新たに空室が出ました（{now_jst():%m/%d %H:%M}）\n\n"
                                   "| ホテル | 空いている部屋 | 空室ページ |\n|---|---|---|\n" + hotel_lines(new))
@@ -410,8 +416,46 @@ def main() -> int:
     # 知らせ済みから外すのは、満室と読めたホテルだけ（読み取れなかった回をはさんで同じ空室を二重に知らせない）
     full_now = {norm(h["name"]) for h in target_hotels(cfg, check) if h.get("availability") == "full" and not is_available(h)}
     state["notified"] = sorted({norm(h["name"]) for h in available} | (notified - full_now))
-    save_json(STATE_PATH, state)
-    return 0
+    return True
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--mode", choices=["watch", "check"], default="watch")
+    parser.add_argument("--target", help="この id の target だけを調べる（省略時はすべて）")
+    args = parser.parse_args()
+
+    if IN_ACTIONS and not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")):
+        raise ConfigError("Secrets に CLAUDE_CODE_OAUTH_TOKEN（claude setup-token で発行）を設定してください")
+
+    cfg = load_config()
+    state = load_state()
+    OUT_DIR.mkdir(exist_ok=True)
+    targets = load_targets(cfg, args.target)
+    log(f"mode={args.mode} targets={', '.join(t['id'] for t in targets)}")
+
+    def ended(t: dict) -> bool:
+        return now_jst() >= dt.datetime.fromisoformat(t["stop_watching_at"])
+
+    if args.mode == "watch" and all(ended(t) for t in load_targets(cfg, None)):
+        log("すべての target の監視期限を過ぎたので終了します")
+        if "period-ended" not in state.get("notices", []):
+            create_issue("[東横イン] 空室の監視期間が終わりました",
+                         "すべての日程の監視期限を過ぎたので監視を終了しました。", [LABEL_NOTICE])
+            state.setdefault("notices", []).append("period-ended")
+            save_json(STATE_PATH, state)
+        disable_workflow()
+        return 0
+
+    failed = False
+    for t in targets:
+        if args.mode == "watch" and ended(t):
+            log(f"=== {t['label']}: 監視期限 {t['stop_watching_at']} を過ぎたので飛ばします ===")
+            continue
+        ok = watch_target(t, target_state(state, t, cfg["targets"][0]["id"]), args.mode)
+        save_json(STATE_PATH, state)
+        failed = failed or not ok
+    return 1 if failed and args.mode == "check" else 0
 
 
 if __name__ == "__main__":

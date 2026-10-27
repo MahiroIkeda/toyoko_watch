@@ -3,23 +3,28 @@
 東横イン公式サイト (https://www.toyoko-inn.com/) の空室を10分ごとに調べて、空きが出たら GitHub の Issue で知らせる仕組みです。
 **予約はしません。** 通知を見たら、自分で公式サイトから予約してください。
 
+いま見ている日程・エリア（`config/target.json` の `targets`）:
+
+| id | エリア | 日程（1泊） | 対象のホテル | 監視期限 |
+|---|---|---|---|---|
+| `ikebukuro` | 池袋・大塚 | 2026-10-31 → 11-01 | 名前に「池袋」「大塚」を含む東横イン（池袋北口1・2、大塚駅北口1、山手線大塚駅北口2 など） | 10/31 20:00 |
+| `shizuoka` | 静岡駅前 | 2026-12-26 → 12-27 | 名前に「静岡駅」を含む東横イン（「東静岡」は除く） | 12/26 20:00 |
+
 | 項目 | 内容 |
 |---|---|
-| 日程 | 2026年10月31日 チェックイン → 11月1日 チェックアウト（1泊） |
-| 人数 | 1室・大人2名（ツイン・ダブルなど、2名で泊まれる部屋ならどれでも。禁煙・喫煙どちらも。喫煙ルームは通知に「（喫煙）」と出る） |
-| 対象 | 名前に「池袋」「大塚」を含む東横イン（東横INN池袋北口I、東横INN大塚駅北口 など） |
-| 確認の間隔 | 10分ごと（GitHub Actions） |
-| 通知 | 空きが出たら Issue を作成し、あなたに割り当てる（GitHub の通知・メール・スマホアプリに届く） |
-| 監視期限 | 2026-10-31 20:00 を過ぎたら自動で停止 |
+| 人数 | どれも1室・大人2名（ツイン・ダブルなど、2名で泊まれる部屋ならどれでも。禁煙・喫煙どちらも。喫煙ルームは通知に「（喫煙）」と出る） |
+| 確認の間隔 | 10分ごと（GitHub Actions。1回の実行で、期限内の日程・エリアを順に調べる） |
+| 通知 | 空きが出たら Issue を作成し、あなたに割り当てる（GitHub の通知・メール・スマホアプリに届く）。Issue には日程・エリアごとのラベル `toyoko-<id>` が付く |
+| 監視期限 | 日程・エリアごとに `stop_watching_at` を過ぎたら、その分は調べない。すべて過ぎたら自動で停止 |
 
-条件は [`config/target.json`](config/target.json) で変えられます（`checkin` / `checkout` / `adults` / `hotel_keywords` / `area_hints` / `stop_watching_at`）。
+日程・エリアを増やすときは、`config/target.json` の `targets` に1つ足します（`id` / `label` / `checkin` / `checkout` / `rooms` / `adults` / `hotel_keywords` / `exclude_keywords`（任意）/ `area_hints` / `stop_watching_at`）。
 
 ## 仕組み
 
 ```
 GitHub Actions（10分ごと） .github/workflows/toyoko-watch.yml
   └ scripts/watch_vacancy.py
-      1. 監視期限を過ぎていたら、ワークフローを無効化して終了
+      1. 監視期限を過ぎた日程・エリアは飛ばす（すべて過ぎていたら、ワークフローを無効化して終了）
       2. 空室チェック … .claude/agents/toyoko-vacancy-checker.md（Claude Haiku・読み取り専用）
                      公式サイトで日程・人数・地名を入れて検索し、対象ホテルの部屋ごとの空き・料金を読む
       3. 日付・泊数・人数が条件どおりか、スクリプト側でもう一度確かめる
@@ -48,7 +53,7 @@ bus_book_app で使っているものと同じトークンを登録してかま�
 GitHub Actions の定期実行 (`schedule`) はデフォルトブランチ (main) にあるワークフローだけが動きます。
 
 ### 3. 手動で試す
-**Actions → toyoko-watch → Run workflow** で `mode = check` を選んで実行します。
+**Actions → toyoko-watch → Run workflow** で `mode = check` を選んで実行します（`target` に `shizuoka` などの id を入れると、その日程・エリアだけを調べます）。
 実行結果の Summary に、対象ホテルと空室状況の表が出ます。Haiku が本物のサイトを正しく読めているか確認してください（`check` では Issue は作りません）。
 
 ### 4. 通知の受け取り方
