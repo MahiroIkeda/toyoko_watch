@@ -1,10 +1,28 @@
 {
   "site_url": "https://www.toyoko-inn.com/",
-  "checkin": "2026-10-31",
-  "checkout": "2026-11-01",
-  "rooms": 1,
-  "adults": 2,
-  "hotel_keywords": ["池袋", "大塚"],
-  "area_hints": ["池袋", "大塚"],
-  "stop_watching_at": "2026-10-31T20:00:00+09:00"
+  "targets": [
+    {
+      "id": "ikebukuro",
+      "label": "池袋・大塚",
+      "checkin": "2026-10-31",
+      "checkout": "2026-11-01",
+      "rooms": 1,
+      "adults": 2,
+      "hotel_keywords": ["池袋", "大塚"],
+      "area_hints": ["池袋", "大塚"],
+      "stop_watching_at": "2026-10-31T20:00:00+09:00"
+    },
+    {
+      "id": "shizuoka",
+      "label": "静岡駅前",
+      "checkin": "2026-12-26",
+      "checkout": "2026-12-27",
+      "rooms": 1,
+      "adults": 2,
+      "hotel_keywords": ["静岡駅"],
+      "exclude_keywords": ["東静岡"],
+      "area_hints": ["静岡駅", "静岡"],
+      "stop_watching_at": "2026-12-26T20:00:00+09:00"
+    }
+  ]
 }
